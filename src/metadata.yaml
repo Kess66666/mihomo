@@ -1,7 +1,0 @@
-name: mihomo_manager
-desc: 管理 mihomo 仓库的 GitHub Actions 自动构建、定时同步和 Docker 状态检查
-version: 1.0.0
-author: jyjyjyjjyyl & AI Assistant
-repo: https://github.com/Kess66666/mihomo
-type: general
-platform: all
