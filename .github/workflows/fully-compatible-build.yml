@@ -2,8 +2,8 @@ name: Fully Compatible Build - N5000 & K90 Pro Max
 
 on:
   schedule:
-    # 每周日北京时间 22:00 (UTC 14:00) 自动运行
-    - cron: '0 14 * * 0'
+    # 每周日北京时间 09:00 (UTC 01:00) 自动运行
+    - cron: '0 1 * * 0'
   workflow_dispatch:
     inputs:
       version:
@@ -68,7 +68,11 @@ jobs:
           echo "🚀 Building N5000 optimized version (Go 1.26 + GOAMD64=v2)"
           echo "Static compilation, OpenWrt/iStoreOS compatible"
 
-          go build -v             -tags "with_gvisor"             -trimpath             -ldflags="-s -w -buildid="             -o mihomo-n5000-compatible
+          go build -v \
+            -tags "with_gvisor" \
+            -trimpath \
+            -ldflags="-s -w -buildid=" \
+            -o mihomo-n5000-compatible
 
           echo "📦 Build result:"
           file mihomo-n5000-compatible
@@ -143,16 +147,20 @@ jobs:
           # Set Android NDK compiler
           export CC="${{steps.setup-ndk.outputs.ndk-path}}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
 
-          go build -v             -tags "with_gvisor"             -trimpath             -ldflags="-s -w"             -o mihomo-k90pro-compatible
+          go build -v \
+            -tags "with_gvisor" \
+            -trimpath \
+            -ldflags="-s -w -buildid=" \
+            -o mihomo-k90pro-compatible
 
           echo "📦 Build result:"
           file mihomo-k90pro-compatible
           ls -lh mihomo-k90pro-compatible
-          echo "Binary optimized for: Redmi K90 Pro Max (Snapdragon 8 Elite)"
+          echo "Binary optimized for: k90pro-android16-optimized"
 
       - name: Package K90 Pro Max binary to tar.gz
         run: |
-          echo "📦 Packaging K90 Pro Max binary for OpenClash compatibility"
+          echo "📦 Packaging K90 Pro Max binary"
           tar -czf mihomo-k90pro-compatible.tar.gz mihomo-k90pro-compatible
           echo "Created: mihomo-k90pro-compatible.tar.gz"
           ls -lh *.tar.gz
