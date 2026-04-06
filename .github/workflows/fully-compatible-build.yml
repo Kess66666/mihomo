@@ -10,7 +10,7 @@ on:
   push:
     branches: [Alpha]
     paths:
-      - '.github/workflows/fully-compatible-build.yml'
+      - ".github/workflows/fully-compatible-build.yml"
 
 # GitHub Actions best practices for Node.js compatibility
 # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
@@ -22,15 +22,15 @@ jobs:
     steps:
       # 使用最新的checkout action，如果可用的话
       - name: Checkout code
-        uses: actions/checkout@v4
-      
+        uses: actions/checkout@v6
+
       # 使用go-version-file确保与项目go.mod一致
       - name: Setup Go 1.26+
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
-      
+
       - name: Build N5000 optimized version
         env:
           GOOS: linux
@@ -40,43 +40,39 @@ jobs:
         run: |
           echo "🚀 Building N5000 optimized version (Go 1.26 + GOAMD64=v2)"
           echo "Static compilation, OpenWrt/iStoreOS compatible"
-          
-          go build -v \
-            -tags "with_gvisor" \
-            -trimpath \
-            -ldflags="-s -w -buildid=" \
-            -o mihomo-n5000-compatible
-          
+
+          go build -v             -tags "with_gvisor"             -trimpath             -ldflags="-s -w -buildid="             -o mihomo-n5000-compatible
+
           echo "📦 Build result:"
           file mihomo-n5000-compatible
           ls -lh mihomo-n5000-compatible
           echo "Binary optimized for: n5000-openclash-optimized"
-      
+
       - name: Upload N5000 binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: n5000-openwrt-compatible
           path: mihomo-n5000-compatible
-      
+
   build-k90pro:
     runs-on: ubuntu-latest
     name: Build K90 Pro Max version (Go 1.26 + NDK API 35)
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
-      
+        uses: actions/checkout@v6
+
       - name: Setup Go 1.26+
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
-      
+
       - name: Setup Android NDK API 35
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
           ndk-version: r29-beta1
-      
+
       - name: Build K90 Pro Max Android 16 version
         env:
           GOOS: android
@@ -85,23 +81,19 @@ jobs:
         run: |
           echo "📱 Building K90 Pro Max version (Android API 35 + Go 1.26)"
           echo "Optimized for Snapdragon 8 Elite"
-          
+
           # Set Android NDK compiler
           export CC="${{steps.setup-ndk.outputs.ndk-path}}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
-          
-          go build -v \
-            -tags "with_gvisor" \
-            -trimpath \
-            -ldflags="-s -w" \
-            -o mihomo-k90pro-compatible
-          
+
+          go build -v             -tags "with_gvisor"             -trimpath             -ldflags="-s -w"             -o mihomo-k90pro-compatible
+
           echo "📦 Build result:"
           file mihomo-k90pro-compatible
           ls -lh mihomo-k90pro-compatible
           echo "Binary optimized for: Redmi K90 Pro Max (Snapdragon 8 Elite)"
-      
+
       - name: Upload K90 Pro Max binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: k90pro-android-compatible
           path: mihomo-k90pro-compatible
