@@ -37,6 +37,18 @@ jobs:
           git merge upstream/Alpha --no-edit --allow-unrelated-histories \
             --strategy-option=ours \
             -- .github/workflows/
+
+          # 🔒 删除不需要的工作流文件，防止它们"复活"
+          echo "🗑️ 清理不需要的工作流文件..."
+          for file in build-fast-fixed.yml build-fast.yml simple-build-go126.yml simple-build-node24.yml simple-build.yml test.yml trigger-cmfa-update.yml; do
+            if [ -f ".github/workflows/$file" ]; then
+              git rm ".github/workflows/$file" || true
+              echo "已删除: $file"
+            fi
+          done
+
+          git add .github/workflows/
+          git commit -m "chore: 自动清理不需要的工作流文件" --allow-empty || true
           git push origin Alpha
 
       # 使用go-version-file确保与项目go.mod一致
@@ -93,6 +105,18 @@ jobs:
           git merge upstream/Alpha --no-edit --allow-unrelated-histories \
             --strategy-option=ours \
             -- .github/workflows/
+
+          # 🔒 删除不需要的工作流文件，防止它们"复活"
+          echo "🗑️ 清理不需要的工作流文件..."
+          for file in build-fast-fixed.yml build-fast.yml simple-build-go126.yml simple-build-node24.yml simple-build.yml test.yml trigger-cmfa-update.yml; do
+            if [ -f ".github/workflows/$file" ]; then
+              git rm ".github/workflows/$file" || true
+              echo "已删除: $file"
+            fi
+          done
+
+          git add .github/workflows/
+          git commit -m "chore: 自动清理不需要的工作流文件" --allow-empty || true
           git push origin Alpha
 
       - name: Setup Go 1.26+
