@@ -1,6 +1,9 @@
 name: Fully Compatible Build - N5000 & K90 Pro Max
 
 on:
+  schedule:
+    # 每周日北京时间 22:00 (UTC 14:00) 自动运行
+    - cron: '0 14 * * 0'
   workflow_dispatch:
     inputs:
       version:
@@ -23,6 +26,18 @@ jobs:
       # 使用最新的checkout action，如果可用的话
       - name: Checkout code
         uses: actions/checkout@v6
+
+      # 新增：定时触发时拉取上游代码（保留我们的优化）
+      - name: Sync upstream (scheduled only)
+        if: github.event_name == 'schedule'
+        run: |
+          git remote add upstream https://github.com/MetaCubeX/mihomo.git
+          git fetch upstream
+          # 智能合并：优先保留我们的工作流文件
+          git merge upstream/Alpha --no-edit --allow-unrelated-histories \
+            --strategy-option=ours \
+            -- .github/workflows/
+          git push origin Alpha
 
       # 使用go-version-file确保与项目go.mod一致
       - name: Setup Go 1.26+
@@ -67,6 +82,18 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+
+      # 新增：定时触发时拉取上游代码（保留我们的优化）
+      - name: Sync upstream (scheduled only)
+        if: github.event_name == 'schedule'
+        run: |
+          git remote add upstream https://github.com/MetaCubeX/mihomo.git
+          git fetch upstream
+          # 智能合并：优先保留我们的工作流文件
+          git merge upstream/Alpha --no-edit --allow-unrelated-histories \
+            --strategy-option=ours \
+            -- .github/workflows/
+          git push origin Alpha
 
       - name: Setup Go 1.26+
         uses: actions/setup-go@v6
@@ -141,3 +168,34 @@ jobs:
           echo "🚀 Build time: ~2 minutes (optimized from 10 minutes)"
           echo ""
           echo "📦 Artifacts are packaged as tar.gz for OpenClash compatibility."
+
+      # 新增：清理本工作流的旧运行记录
+      - name: Clean up old workflow runs
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            console.log('🧹 Cleaning up old workflow runs...');
+            const runs = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'fully-compatible-build.yml',
+              per_page: 100
+            });
+
+            // 保留最近5次运行，删除更早的
+            const toDelete = runs.data.workflow_runs.slice(5);
+            console.log(`Will delete ${toDelete.length} old runs`);
+
+            for (const run of toDelete) {
+              try {
+                await github.rest.actions.deleteWorkflowRun({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  run_id: run.id
+                });
+                console.log(`✅ Deleted run ${run.id}`);
+              } catch (error) {
+                console.log(`⚠️ Could not delete run ${run.id}: ${error.message}`);
+              }
+            }
