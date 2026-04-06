@@ -1,0 +1,12 @@
+repo_owner:
+  description: GitHub 仓库所有者
+  type: string
+  default: Kess66666
+repo_name:
+  description: GitHub 仓库名称
+  type: string
+  default: mihomo
+main_workflow:
+  description: 主构建工作流文件名
+  type: string
+  default: fully-compatible-build.yml
