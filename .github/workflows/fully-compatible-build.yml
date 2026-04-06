@@ -48,11 +48,18 @@ jobs:
           ls -lh mihomo-n5000-compatible
           echo "Binary optimized for: n5000-openclash-optimized"
 
+      - name: Package N5000 binary to tar.gz
+        run: |
+          echo "📦 Packaging N5000 binary for OpenClash compatibility"
+          tar -czf mihomo-n5000-compatible.tar.gz mihomo-n5000-compatible
+          echo "Created: mihomo-n5000-compatible.tar.gz"
+          ls -lh *.tar.gz
+
       - name: Upload N5000 binary
         uses: actions/upload-artifact@v6
         with:
-          name: n5000-openwrt-compatible
-          path: mihomo-n5000-compatible
+          name: n5000-openwrt-compatible-targz
+          path: mihomo-n5000-compatible.tar.gz
 
   build-k90pro:
     runs-on: ubuntu-latest
@@ -92,11 +99,18 @@ jobs:
           ls -lh mihomo-k90pro-compatible
           echo "Binary optimized for: Redmi K90 Pro Max (Snapdragon 8 Elite)"
 
+      - name: Package K90 Pro Max binary to tar.gz
+        run: |
+          echo "📦 Packaging K90 Pro Max binary for OpenClash compatibility"
+          tar -czf mihomo-k90pro-compatible.tar.gz mihomo-k90pro-compatible
+          echo "Created: mihomo-k90pro-compatible.tar.gz"
+          ls -lh *.tar.gz
+
       - name: Upload K90 Pro Max binary
         uses: actions/upload-artifact@v6
         with:
-          name: k90pro-android-compatible
-          path: mihomo-k90pro-compatible
+          name: k90pro-android-compatible-targz
+          path: mihomo-k90pro-compatible.tar.gz
 
   summary:
     runs-on: ubuntu-latest
@@ -126,4 +140,4 @@ jobs:
           echo ""
           echo "🚀 Build time: ~2 minutes (optimized from 10 minutes)"
           echo ""
-          echo "📦 Artifacts are ready for download and testing."
+          echo "📦 Artifacts are packaged as tar.gz for OpenClash compatibility."
