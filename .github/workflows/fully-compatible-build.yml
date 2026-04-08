@@ -18,6 +18,9 @@ on:
 # GitHub Actions best practices for Node.js compatibility
 # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
 
+# Force all JavaScript actions to use Node.js 24
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 jobs:
   build-n5000:
     runs-on: ubuntu-latest
