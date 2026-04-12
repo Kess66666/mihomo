@@ -15,9 +15,6 @@ on:
     paths:
       - ".github/workflows/fully-compatible-build.yml"
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-
 jobs:
   build-n5000:
     runs-on: ubuntu-latest
