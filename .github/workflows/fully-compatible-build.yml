@@ -25,7 +25,7 @@ jobs:
     name: Build N5000 version (Go 1.26)
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -46,22 +46,39 @@ jobs:
           git merge upstream/Alpha --no-edit --allow-unrelated-histories \
             -X ours || true
 
-          # 確保我們的自定義 workflow 不被覆蓋
-          git checkout HEAD -- .github/workflows/fully-compatible-build.yml || true
+          # 🗑️ 清理不需要的工作流文件，防止它们"复活"
+          echo "清理多余 workflow 文件..."
+          find .github/workflows -type f -name "*.yml" ! -name "fully-compatible-build.yml" -delete
 
-          # 提交同步結果（如果有變更）
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: sync upstream MetaCubeX/mihomo Alpha"
+          # 确保我们的自定义 workflow 是最新的（因为上面可能删错了或者合并覆盖）
+          git checkout HEAD -- .github/workflows/fully-compatible-build.yml 2>/dev/null || true
+
+          # 提交同步结果
+          if [ -n "$(git status --porcelain)" ]; then
+            git add .
+            git commit -m "chore: sync upstream and clean workflows"
+            git push origin Alpha
           fi
 
-          # 推送回我們的 Alpha 分支
-          git push origin Alpha
-
       - name: Setup Go 1.26+
+        id: setup-go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Apply Go 1.26 Patches
+        if: contains(steps.setup-go.outputs.go-version, '1.26')
+        run: |
+          echo "Applying Go 1.26 patches..."
+          cd $(go env GOROOT)
+          # 仅当 patch 文件存在时应用
+          for patch_file in issue77731 issue77975 issue77930; do
+            if [ -f "$GITHUB_WORKSPACE/.github/patch/${patch_file}.patch" ]; then
+              echo "Applying $patch_file..."
+              patch --verbose -p 1 < "$GITHUB_WORKSPACE/.github/patch/${patch_file}.patch" || echo "Warning: Patch $patch_file failed"
+            fi
+          done
 
       - name: Build N5000 optimized version
         env:
@@ -87,17 +104,18 @@ jobs:
           ls -lh *.tar.gz
 
       - name: Upload N5000 binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: n5000-openwrt-compatible-targz
           path: mihomo-n5000-compatible.tar.gz
+          if-no-files-found: error
 
   build-k90pro:
     runs-on: ubuntu-latest
     name: Build K90 Pro Max version (Go 1.26 + NDK API 35)
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -116,19 +134,35 @@ jobs:
           git merge upstream/Alpha --no-edit --allow-unrelated-histories \
             -X ours || true
 
-          git checkout HEAD -- .github/workflows/fully-compatible-build.yml || true
+          # 🗑️ 清理不需要的工作流文件
+          find .github/workflows -type f -name "*.yml" ! -name "fully-compatible-build.yml" -delete
 
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: sync upstream MetaCubeX/mihomo Alpha"
+          git checkout HEAD -- .github/workflows/fully-compatible-build.yml 2>/dev/null || true
+
+          if [ -n "$(git status --porcelain)" ]; then
+            git add .
+            git commit -m "chore: sync upstream and clean workflows"
+            git push origin Alpha
           fi
 
-          git push origin Alpha
-
       - name: Setup Go 1.26+
+        id: setup-go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Apply Go 1.26 Patches
+        if: contains(steps.setup-go.outputs.go-version, '1.26')
+        run: |
+          echo "Applying Go 1.26 patches..."
+          cd $(go env GOROOT)
+          for patch_file in issue77731 issue77975 issue77930; do
+            if [ -f "$GITHUB_WORKSPACE/.github/patch/${patch_file}.patch" ]; then
+              echo "Applying $patch_file..."
+              patch --verbose -p 1 < "$GITHUB_WORKSPACE/.github/patch/${patch_file}.patch" || echo "Warning: Patch $patch_file failed"
+            fi
+          done
 
       - name: Setup Android NDK API 35
         uses: nttld/setup-ndk@v1
@@ -161,10 +195,11 @@ jobs:
           ls -lh *.tar.gz
 
       - name: Upload K90 Pro Max binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: k90pro-android-compatible-targz
           path: mihomo-k90pro-compatible.tar.gz
+          if-no-files-found: error
 
   summary:
     runs-on: ubuntu-latest
@@ -177,7 +212,7 @@ jobs:
           echo "✅ Fully Compatible Build Completed Successfully!"
           echo ""
           echo "🔧 Technical Specifications:"
-          echo "  • Go version: 1.26+ (aligned with official build.yml)"
+          echo "  • Go version: 1.26+ (with upstream patches)"
           echo "  • Node.js compatibility: Full support for Node.js 24"
           echo ""
           echo "🎯 Device-Optimized Configurations:"
