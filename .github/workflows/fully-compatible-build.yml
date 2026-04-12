@@ -15,7 +15,6 @@ on:
     paths:
       - ".github/workflows/fully-compatible-build.yml"
 
-# GitHub Actions best practices for Node.js compatibility
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
@@ -35,25 +34,11 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # 添加上游遠程倉庫（如果尚未添加）
-          git remote get-url upstream >/dev/null 2>&1 || \
-            git remote add upstream https://github.com/MetaCubeX/mihomo.git
-
+          git remote get-url upstream >/dev/null 2>&1 || git remote add upstream https://github.com/MetaCubeX/mihomo.git
           git fetch upstream Alpha
-
-          # 合併上游程式碼（包含 go.mod、原始碼等所有變更）
-          git merge upstream/Alpha --no-edit --allow-unrelated-histories \
-            -X ours || true
-
-          # 🗑️ 清理不需要的工作流文件，防止它们"复活"
-          echo "清理多余 workflow 文件..."
+          git merge upstream/Alpha --no-edit --allow-unrelated-histories -X ours || true
           find .github/workflows -type f -name "*.yml" ! -name "fully-compatible-build.yml" -delete
-
-          # 确保我们的自定义 workflow 是最新的（因为上面可能删错了或者合并覆盖）
           git checkout HEAD -- .github/workflows/fully-compatible-build.yml 2>/dev/null || true
-
-          # 提交同步结果
           if [ -n "$(git status --porcelain)" ]; then
             git add .
             git commit -m "chore: sync upstream and clean workflows"
@@ -72,11 +57,9 @@ jobs:
         run: |
           echo "Applying Go 1.26 patches..."
           cd $(go env GOROOT)
-          # 仅当 patch 文件存在时应用
           for patch_file in issue77731 issue77975 issue77930; do
             if [ -f "$GITHUB_WORKSPACE/.github/patch/${patch_file}.patch" ]; then
-              echo "Applying $patch_file..."
-              patch --verbose -p 1 < "$GITHUB_WORKSPACE/.github/patch/${patch_file}.patch" || echo "Warning: Patch $patch_file failed"
+              patch --verbose -p 1 < "$GITHUB_WORKSPACE/.github/patch/${patch_file}.patch" || true
             fi
           done
 
@@ -87,14 +70,7 @@ jobs:
           GOAMD64: v2
           CGO_ENABLED: 0
         run: |
-          echo "🚀 Building N5000 optimized version (Go 1.26 + GOAMD64=v2)"
-          go build -v \
-            -tags "with_gvisor" \
-            -trimpath \
-            -ldflags="-s -w -buildid=" \
-            -o mihomo-n5000-compatible
-
-          echo "📦 Build result:"
+          go build -v -tags "with_gvisor" -trimpath -ldflags="-s -w -buildid=" -o mihomo-n5000-compatible
           file mihomo-n5000-compatible
           ls -lh mihomo-n5000-compatible
 
@@ -125,20 +101,11 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git remote get-url upstream >/dev/null 2>&1 || \
-            git remote add upstream https://github.com/MetaCubeX/mihomo.git
-
+          git remote get-url upstream >/dev/null 2>&1 || git remote add upstream https://github.com/MetaCubeX/mihomo.git
           git fetch upstream Alpha
-
-          git merge upstream/Alpha --no-edit --allow-unrelated-histories \
-            -X ours || true
-
-          # 🗑️ 清理不需要的工作流文件
+          git merge upstream/Alpha --no-edit --allow-unrelated-histories -X ours || true
           find .github/workflows -type f -name "*.yml" ! -name "fully-compatible-build.yml" -delete
-
           git checkout HEAD -- .github/workflows/fully-compatible-build.yml 2>/dev/null || true
-
           if [ -n "$(git status --porcelain)" ]; then
             git add .
             git commit -m "chore: sync upstream and clean workflows"
@@ -159,8 +126,7 @@ jobs:
           cd $(go env GOROOT)
           for patch_file in issue77731 issue77975 issue77930; do
             if [ -f "$GITHUB_WORKSPACE/.github/patch/${patch_file}.patch" ]; then
-              echo "Applying $patch_file..."
-              patch --verbose -p 1 < "$GITHUB_WORKSPACE/.github/patch/${patch_file}.patch" || echo "Warning: Patch $patch_file failed"
+              patch --verbose -p 1 < "$GITHUB_WORKSPACE/.github/patch/${patch_file}.patch" || true
             fi
           done
 
@@ -176,16 +142,9 @@ jobs:
           GOARCH: arm64
           CGO_ENABLED: 1
         run: |
-          echo "📱 Building K90 Pro Max version (Android API 35 + Go 1.26)"
+          echo "Building K90 Pro Max..."
           export CC="${{steps.setup-ndk.outputs.ndk-path}}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
-
-          go build -v \
-            -tags "with_gvisor" \
-            -trimpath \
-            -ldflags="-s -w -buildid=" \
-            -o mihomo-k90pro-compatible
-
-          echo "📦 Build result:"
+          go build -v -tags "with_gvisor" -trimpath -ldflags="-s -w -buildid=" -o mihomo-k90pro-compatible
           file mihomo-k90pro-compatible
           ls -lh mihomo-k90pro-compatible
 
@@ -210,34 +169,13 @@ jobs:
       - name: Show results
         run: |
           echo "✅ Fully Compatible Build Completed Successfully!"
-          echo ""
-          echo "🔧 Technical Specifications:"
-          echo "  • Go version: 1.26+ (with upstream patches)"
-          echo "  • Node.js compatibility: Full support for Node.js 24"
-          echo ""
-          echo "🎯 Device-Optimized Configurations:"
-          echo "  • N5000: GOAMD64=v2, CGO_ENABLED=0, with_gvisor"
-          echo "  • K90 Pro Max: Android API 35, Snapdragon 8 Elite"
 
       - name: Clean up old workflow runs
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const runs = await github.rest.actions.listWorkflowRuns({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'fully-compatible-build.yml',
-              per_page: 100
-            });
-            const toDelete = runs.data.workflow_runs.slice(5);
-            for (const run of toDelete) {
-              try {
-                await github.rest.actions.deleteWorkflowRun({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  run_id: run.id
-                });
-              } catch (error) {
-                console.log(`⚠️ Could not delete run ${run.id}: ${error.message}`);
-              }
-            }
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🧹 Cleaning up old runs..."
+          gh run list --workflow=fully-compatible-build.yml --limit 100 --json databaseId,status \
+            --jq '.[] | select(.status == "completed") | .databaseId' | tail -n +6 | while read id; do
+            gh run delete $id || true
+          done
