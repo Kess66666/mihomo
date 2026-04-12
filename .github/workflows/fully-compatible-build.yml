@@ -2,8 +2,8 @@ name: Fully Compatible Build - N5000 & K90 Pro Max
 
 on:
   schedule:
-    # 每周日北京时间 09:00 (UTC 01:00) 自动运行
-    - cron: '0 1 * * 0'
+    # 每周日北京时间 22:00 (UTC 14:00) 自动运行
+    - cron: '0 14 * * 0'
   workflow_dispatch:
     inputs:
       version:
@@ -16,47 +16,49 @@ on:
       - ".github/workflows/fully-compatible-build.yml"
 
 # GitHub Actions best practices for Node.js compatibility
-# https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
-
-# Force all JavaScript actions to use Node.js 24
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   build-n5000:
     runs-on: ubuntu-latest
     name: Build N5000 version (Go 1.26)
     steps:
-      # 使用最新的checkout action，如果可用的话
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      # 新增：定时触发时拉取上游代码（保留我们的优化）
       - name: Sync upstream (scheduled only)
         if: github.event_name == 'schedule'
         run: |
-          git remote add upstream https://github.com/MetaCubeX/mihomo.git
-          git fetch upstream
-          # 智能合并：优先保留我们的工作流文件
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # 添加上游遠程倉庫（如果尚未添加）
+          git remote get-url upstream >/dev/null 2>&1 || \
+            git remote add upstream https://github.com/MetaCubeX/mihomo.git
+
+          git fetch upstream Alpha
+
+          # 合併上游程式碼（包含 go.mod、原始碼等所有變更）
           git merge upstream/Alpha --no-edit --allow-unrelated-histories \
-            --strategy-option=ours \
-            -- .github/workflows/
+            -X ours || true
 
-          # 🔒 删除不需要的工作流文件，防止它们"复活"
-          echo "🗑️ 清理不需要的工作流文件..."
-          for file in build-fast-fixed.yml build-fast.yml simple-build-go126.yml simple-build-node24.yml simple-build.yml test.yml trigger-cmfa-update.yml; do
-            if [ -f ".github/workflows/$file" ]; then
-              git rm ".github/workflows/$file" || true
-              echo "已删除: $file"
-            fi
-          done
+          # 確保我們的自定義 workflow 不被覆蓋
+          git checkout HEAD -- .github/workflows/fully-compatible-build.yml || true
 
-          git add .github/workflows/
-          git commit -m "chore: 自动清理不需要的工作流文件" --allow-empty || true
+          # 提交同步結果（如果有變更）
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: sync upstream MetaCubeX/mihomo Alpha"
+          fi
+
+          # 推送回我們的 Alpha 分支
           git push origin Alpha
 
-      # 使用go-version-file确保与项目go.mod一致
       - name: Setup Go 1.26+
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
@@ -65,12 +67,10 @@ jobs:
         env:
           GOOS: linux
           GOARCH: amd64
-          GOAMD64: v2  # Perfect match for N5000 instruction set
-          CGO_ENABLED: 0  # Static compilation for OpenWrt
+          GOAMD64: v2
+          CGO_ENABLED: 0
         run: |
           echo "🚀 Building N5000 optimized version (Go 1.26 + GOAMD64=v2)"
-          echo "Static compilation, OpenWrt/iStoreOS compatible"
-
           go build -v \
             -tags "with_gvisor" \
             -trimpath \
@@ -80,17 +80,14 @@ jobs:
           echo "📦 Build result:"
           file mihomo-n5000-compatible
           ls -lh mihomo-n5000-compatible
-          echo "Binary optimized for: n5000-openclash-optimized"
 
       - name: Package N5000 binary to tar.gz
         run: |
-          echo "📦 Packaging N5000 binary for OpenClash compatibility"
           tar -czf mihomo-n5000-compatible.tar.gz mihomo-n5000-compatible
-          echo "Created: mihomo-n5000-compatible.tar.gz"
           ls -lh *.tar.gz
 
       - name: Upload N5000 binary
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: n5000-openwrt-compatible-targz
           path: mihomo-n5000-compatible.tar.gz
@@ -100,35 +97,36 @@ jobs:
     name: Build K90 Pro Max version (Go 1.26 + NDK API 35)
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      # 新增：定时触发时拉取上游代码（保留我们的优化）
       - name: Sync upstream (scheduled only)
         if: github.event_name == 'schedule'
         run: |
-          git remote add upstream https://github.com/MetaCubeX/mihomo.git
-          git fetch upstream
-          # 智能合并：优先保留我们的工作流文件
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git remote get-url upstream >/dev/null 2>&1 || \
+            git remote add upstream https://github.com/MetaCubeX/mihomo.git
+
+          git fetch upstream Alpha
+
           git merge upstream/Alpha --no-edit --allow-unrelated-histories \
-            --strategy-option=ours \
-            -- .github/workflows/
+            -X ours || true
 
-          # 🔒 删除不需要的工作流文件，防止它们"复活"
-          echo "🗑️ 清理不需要的工作流文件..."
-          for file in build-fast-fixed.yml build-fast.yml simple-build-go126.yml simple-build-node24.yml simple-build.yml test.yml trigger-cmfa-update.yml; do
-            if [ -f ".github/workflows/$file" ]; then
-              git rm ".github/workflows/$file" || true
-              echo "已删除: $file"
-            fi
-          done
+          git checkout HEAD -- .github/workflows/fully-compatible-build.yml || true
 
-          git add .github/workflows/
-          git commit -m "chore: 自动清理不需要的工作流文件" --allow-empty || true
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: sync upstream MetaCubeX/mihomo Alpha"
+          fi
+
           git push origin Alpha
 
       - name: Setup Go 1.26+
-        uses: actions/setup-go@v6
-        with:
+        uses: actions/setup-go@v5
+        with:2
           go-version-file: go.mod
           cache: true
 
@@ -142,12 +140,9 @@ jobs:
         env:
           GOOS: android
           GOARCH: arm64
-          CGO_ENABLED: 1  # Native performance for Snapdragon 8 Elite
+          CGO_ENABLED: 1
         run: |
           echo "📱 Building K90 Pro Max version (Android API 35 + Go 1.26)"
-          echo "Optimized for Snapdragon 8 Elite"
-
-          # Set Android NDK compiler
           export CC="${{steps.setup-ndk.outputs.ndk-path}}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
 
           go build -v \
@@ -159,17 +154,14 @@ jobs:
           echo "📦 Build result:"
           file mihomo-k90pro-compatible
           ls -lh mihomo-k90pro-compatible
-          echo "Binary optimized for: k90pro-android16-optimized"
 
       - name: Package K90 Pro Max binary to tar.gz
         run: |
-          echo "📦 Packaging K90 Pro Max binary"
           tar -czf mihomo-k90pro-compatible.tar.gz mihomo-k90pro-compatible
-          echo "Created: mihomo-k90pro-compatible.tar.gz"
           ls -lh *.tar.gz
 
       - name: Upload K90 Pro Max binary
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: k90pro-android-compatible-targz
           path: mihomo-k90pro-compatible.tar.gz
@@ -177,6 +169,7 @@ jobs:
   summary:
     runs-on: ubuntu-latest
     needs: [build-n5000, build-k90pro]
+    if: success()
     name: Build Summary
     steps:
       - name: Show results
@@ -186,42 +179,22 @@ jobs:
           echo "🔧 Technical Specifications:"
           echo "  • Go version: 1.26+ (aligned with official build.yml)"
           echo "  • Node.js compatibility: Full support for Node.js 24"
-          echo "  • No deprecation warnings"
           echo ""
           echo "🎯 Device-Optimized Configurations:"
-          echo "  • N5000: n5000-openclash-optimized"
-          echo "    - GOOS=linux, GOARCH=amd64, GOAMD64=v2"
-          echo "    - CGO_ENABLED=0 (static compilation)"
-          echo "    - with_gvisor network stack"
-          echo "    - -s -w -buildid= (extreme compression)"
-          echo ""
-          echo "  • K90 Pro Max:"
-          echo "    - Android API 35 (Android 16 compatible)"
-          echo "    - Snapdragon 8 Elite native optimizations"
-          echo "    - CGO_ENABLED=1 for best performance"
-          echo ""
-          echo "🚀 Build time: ~2 minutes (optimized from 10 minutes)"
-          echo ""
-          echo "📦 Artifacts are packaged as tar.gz for OpenClash compatibility."
+          echo "  • N5000: GOAMD64=v2, CGO_ENABLED=0, with_gvisor"
+          echo "  • K90 Pro Max: Android API 35, Snapdragon 8 Elite"
 
-      # 新增：清理本工作流的旧运行记录
       - name: Clean up old workflow runs
-        if: success()
         uses: actions/github-script@v7
         with:
           script: |
-            console.log('🧹 Cleaning up old workflow runs...');
             const runs = await github.rest.actions.listWorkflowRuns({
               owner: context.repo.owner,
               repo: context.repo.repo,
               workflow_id: 'fully-compatible-build.yml',
               per_page: 100
             });
-
-            // 保留最近5次运行，删除更早的
             const toDelete = runs.data.workflow_runs.slice(5);
-            console.log(`Will delete ${toDelete.length} old runs`);
-
             for (const run of toDelete) {
               try {
                 await github.rest.actions.deleteWorkflowRun({
@@ -229,7 +202,6 @@ jobs:
                   repo: context.repo.repo,
                   run_id: run.id
                 });
-                console.log(`✅ Deleted run ${run.id}`);
               } catch (error) {
                 console.log(`⚠️ Could not delete run ${run.id}: ${error.message}`);
               }
