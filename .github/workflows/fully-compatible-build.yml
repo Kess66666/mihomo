@@ -1,0 +1,173 @@
+name: Fully Compatible Build - N5000 & K90 Pro Max
+
+on:
+  schedule:
+    - cron: '0 14 * * 0'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Tag version to release"
+        required: true
+        default: "alpha-compatible"
+  push:
+    branches: [Alpha]
+    paths:
+      - ".github/workflows/fully-compatible-build.yml"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    name: Sync upstream (scheduled only)
+    if: github.event_name == 'schedule'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync upstream
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote get-url upstream >/dev/null 2>&1 || git remote add upstream https://github.com/MetaCubeX/mihomo.git
+          git fetch upstream Alpha
+          git merge upstream/Alpha --no-edit --allow-unrelated-histories -X ours || true
+          find .github/workflows -type f -name "*.yml" ! -name "fully-compatible-build.yml" -delete
+          git checkout HEAD -- .github/workflows/fully-compatible-build.yml 2>/dev/null || true
+          if [ -n "$(git status --porcelain)" ]; then
+            git add .
+            git commit -m "chore: sync upstream and clean workflows"
+            git push origin Alpha
+          fi
+
+  build-n5000:
+    runs-on: ubuntu-latest
+    name: Build N5000 version (Go 1.26)
+    needs: [sync]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Go 1.26+
+        id: setup-go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Apply Go 1.26 Patches
+        if: contains(steps.setup-go.outputs.go-version, '1.26')
+        run: |
+          echo "Applying Go 1.26 patches..."
+          cd $(go env GOROOT)
+          for patch_file in issue77731 issue77975 issue77930; do
+            if [ -f "$GITHUB_WORKSPACE/.github/patch/${patch_file}.patch" ]; then
+              patch --verbose -p 1 < "$GITHUB_WORKSPACE/.github/patch/${patch_file}.patch" || true
+            fi
+          done
+
+      - name: Build N5000 optimized version
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          GOAMD64: v2
+          CGO_ENABLED: 0
+        run: |
+          go build -v -tags "with_gvisor" -trimpath -ldflags="-s -w -buildid=" -o mihomo-n5000-compatible
+          file mihomo-n5000-compatible
+          ls -lh mihomo-n5000-compatible
+
+      - name: Package N5000 binary to tar.gz
+        run: |
+          tar -czf mihomo-n5000-compatible.tar.gz mihomo-n5000-compatible
+          ls -lh *.tar.gz
+
+      - name: Upload N5000 binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: n5000-openwrt-compatible-targz
+          path: mihomo-n5000-compatible.tar.gz
+          if-no-files-found: error
+
+  build-k90pro:
+    runs-on: ubuntu-latest
+    name: Build K90 Pro Max version (Go 1.26 + NDK API 35)
+    needs: [sync]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Go 1.26+
+        id: setup-go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Apply Go 1.26 Patches
+        if: contains(steps.setup-go.outputs.go-version, '1.26')
+        run: |
+          echo "Applying Go 1.26 patches..."
+          cd $(go env GOROOT)
+          for patch_file in issue77731 issue77975 issue77930; do
+            if [ -f "$GITHUB_WORKSPACE/.github/patch/${patch_file}.patch" ]; then
+              patch --verbose -p 1 < "$GITHUB_WORKSPACE/.github/patch/${patch_file}.patch" || true
+            fi
+          done
+
+      - name: Setup Android NDK API 35
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r29-beta1
+
+      - name: Build K90 Pro Max Android 16 version
+        env:
+          GOOS: android
+          GOARCH: arm64
+          CGO_ENABLED: 1
+        run: |
+          echo "Building K90 Pro Max..."
+          export CC="${{steps.setup-ndk.outputs.ndk-path}}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
+          go build -v -tags "with_gvisor" -trimpath -ldflags="-s -w -buildid=" -o mihomo-k90pro-compatible
+          file mihomo-k90pro-compatible
+          ls -lh mihomo-k90pro-compatible
+
+      - name: Package K90 Pro Max binary to tar.gz
+        run: |
+          tar -czf mihomo-k90pro-compatible.tar.gz mihomo-k90pro-compatible
+          ls -lh *.tar.gz
+
+      - name: Upload K90 Pro Max binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: k90pro-android-compatible-targz
+          path: mihomo-k90pro-compatible.tar.gz
+          if-no-files-found: error
+
+  summary:
+    runs-on: ubuntu-latest
+    needs: [build-n5000, build-k90pro]
+    if: success()
+    name: Build Summary
+    steps:
+      - name: Show results
+        run: |
+          echo "✅ Fully Compatible Build Completed Successfully!"
+
+      - name: Clean up old workflow runs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🧹 Cleaning up old runs..."
+          gh run list --workflow=fully-compatible-build.yml --limit 100 --json databaseId,status \
+            --jq '.[] | select(.status == "completed") | .databaseId' | tail -n +6 | while read id; do
+            gh run delete $id || true
+          done
