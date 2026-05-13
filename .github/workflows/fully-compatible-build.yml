@@ -2,7 +2,6 @@ name: Fully Compatible Build - N5000 & K90 Pro Max
 
 on:
   schedule:
-    # 每周日北京时间 22:00 (UTC 14:00) 自动运行
     - cron: '0 14 * * 0'
   workflow_dispatch:
     inputs:
@@ -16,9 +15,10 @@ on:
       - ".github/workflows/fully-compatible-build.yml"
 
 jobs:
-  build-n5000:
+  sync:
     runs-on: ubuntu-latest
-    name: Build N5000 version (Go 1.26)
+    name: Sync upstream (scheduled only)
+    if: github.event_name == 'schedule'
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -26,8 +26,7 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Sync upstream (scheduled only)
-        if: github.event_name == 'schedule'
+      - name: Sync upstream
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -41,6 +40,17 @@ jobs:
             git commit -m "chore: sync upstream and clean workflows"
             git push origin Alpha
           fi
+
+  build-n5000:
+    runs-on: ubuntu-latest
+    name: Build N5000 version (Go 1.26)
+    needs: [sync]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Go 1.26+
         id: setup-go
@@ -86,28 +96,13 @@ jobs:
   build-k90pro:
     runs-on: ubuntu-latest
     name: Build K90 Pro Max version (Go 1.26 + NDK API 35)
+    needs: [sync]
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Sync upstream (scheduled only)
-        if: github.event_name == 'schedule'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git remote get-url upstream >/dev/null 2>&1 || git remote add upstream https://github.com/MetaCubeX/mihomo.git
-          git fetch upstream Alpha
-          git merge upstream/Alpha --no-edit --allow-unrelated-histories -X ours || true
-          find .github/workflows -type f -name "*.yml" ! -name "fully-compatible-build.yml" -delete
-          git checkout HEAD -- .github/workflows/fully-compatible-build.yml 2>/dev/null || true
-          if [ -n "$(git status --porcelain)" ]; then
-            git add .
-            git commit -m "chore: sync upstream and clean workflows"
-            git push origin Alpha
-          fi
 
       - name: Setup Go 1.26+
         id: setup-go
