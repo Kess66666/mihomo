@@ -86,11 +86,21 @@ jobs:
           tar -czf mihomo-n5000-compatible.tar.gz mihomo-n5000-compatible
           ls -lh *.tar.gz
 
+      - name: Generate SHA256 checksum
+        run: sha256sum mihomo-n5000-compatible.tar.gz > mihomo-n5000-compatible.tar.gz.sha256
+
       - name: Upload N5000 binary
         uses: actions/upload-artifact@v7
         with:
           name: n5000-openwrt-compatible-targz
           path: mihomo-n5000-compatible.tar.gz
+          if-no-files-found: error
+
+      - name: Upload N5000 SHA256
+        uses: actions/upload-artifact@v7
+        with:
+          name: n5000-openwrt-compatible-sha256
+          path: mihomo-n5000-compatible.tar.gz.sha256
           if-no-files-found: error
 
   build-k90pro:
@@ -122,11 +132,15 @@ jobs:
             fi
           done
 
-      - name: Setup Android NDK API 35
-        uses: nttld/setup-ndk@v1
-        id: setup-ndk
-        with:
-          ndk-version: r29-beta1
+      - name: Setup Android NDK API 35 (from Google official)
+        run: |
+          NDK_VER="r29-beta1"
+          NDK_URL="https://dl.google.com/android/repository/android-ndk-${NDK_VER}-linux.zip"
+          echo "Downloading NDK ${NDK_VER} from Google..."
+          curl -sSL --retry 3 -o /tmp/ndk.zip "$NDK_URL"
+          unzip -q /tmp/ndk.zip -d /tmp
+          echo "NDK_PATH=/tmp/android-ndk-${NDK_VER}" >> $GITHUB_ENV
+          echo "NDK installed: $(/tmp/android-ndk-${NDK_VER}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang --version 2>/dev/null || echo 'binary found')"
 
       - name: Build K90 Pro Max Android 16 version
         env:
@@ -135,7 +149,7 @@ jobs:
           CGO_ENABLED: 1
         run: |
           echo "Building K90 Pro Max..."
-          export CC="${{steps.setup-ndk.outputs.ndk-path}}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
+          export CC="${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
           go build -v -tags "with_gvisor" -trimpath -ldflags="-s -w -buildid=" -o mihomo-k90pro-compatible
           file mihomo-k90pro-compatible
           ls -lh mihomo-k90pro-compatible
@@ -145,11 +159,21 @@ jobs:
           tar -czf mihomo-k90pro-compatible.tar.gz mihomo-k90pro-compatible
           ls -lh *.tar.gz
 
+      - name: Generate SHA256 checksum
+        run: sha256sum mihomo-k90pro-compatible.tar.gz > mihomo-k90pro-compatible.tar.gz.sha256
+
       - name: Upload K90 Pro Max binary
         uses: actions/upload-artifact@v7
         with:
           name: k90pro-android-compatible-targz
           path: mihomo-k90pro-compatible.tar.gz
+          if-no-files-found: error
+
+      - name: Upload K90 Pro Max SHA256
+        uses: actions/upload-artifact@v7
+        with:
+          name: k90pro-android-compatible-sha256
+          path: mihomo-k90pro-compatible.tar.gz.sha256
           if-no-files-found: error
 
   summary:
