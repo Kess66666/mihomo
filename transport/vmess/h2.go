@@ -2,6 +2,7 @@ package vmess
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/url"
@@ -28,6 +29,9 @@ type H2Config struct {
 func (hc *h2Conn) establishConn() error {
 	preader, pwriter := io.Pipe()
 
+	if len(hc.cfg.Hosts) == 0 {
+		return errors.New("hosts is empty")
+	}
 	host := hc.cfg.Hosts[randv2.IntN(len(hc.cfg.Hosts))]
 	path := hc.cfg.Path
 	// TODO: connect use VMess Host instead of H2 Host
@@ -101,6 +105,10 @@ func StreamH2Conn(ctx context.Context, conn net.Conn, cfg *H2Config) (_ net.Conn
 	}
 
 	// use h2c mode to disallow the net/http fallback to http1.1
+	//
+	// Note that this usage is only applicable to our own net/http fork.
+	// The standard library also needs to mask the tls.Conn type for the conn returned by DialTLSContext,
+	// see: https://github.com/golang/go/issues/79293#issuecomment-4426393534
 	protocols := new(http.Protocols)
 	protocols.SetUnencryptedHTTP2(true)
 	transport := &http.Transport{

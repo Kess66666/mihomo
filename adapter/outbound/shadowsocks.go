@@ -10,7 +10,7 @@ import (
 	"github.com/metacubex/mihomo/common/structure"
 	C "github.com/metacubex/mihomo/constant"
 	"github.com/metacubex/mihomo/ntp"
-	gost "github.com/metacubex/mihomo/transport/gost-plugin"
+	gost "github.com/metacubex/mihomo/transport/gost"
 	"github.com/metacubex/mihomo/transport/kcptun"
 	"github.com/metacubex/mihomo/transport/restls"
 	obfs "github.com/metacubex/mihomo/transport/simple-obfs"
@@ -69,6 +69,7 @@ type v2rayObfsOption struct {
 	PrivateKey               string            `obfs:"private-key,omitempty"`
 	Headers                  map[string]string `obfs:"headers,omitempty"`
 	SkipCertVerify           bool              `obfs:"skip-cert-verify,omitempty"`
+	NameCertVerify           string            `obfs:"name-cert-verify,omitempty"`
 	Mux                      bool              `obfs:"mux,omitempty"`
 	V2rayHttpUpgrade         bool              `obfs:"v2ray-http-upgrade,omitempty"`
 	V2rayHttpUpgradeFastOpen bool              `obfs:"v2ray-http-upgrade-fast-open,omitempty"`
@@ -85,6 +86,7 @@ type gostObfsOption struct {
 	PrivateKey     string            `obfs:"private-key,omitempty"`
 	Headers        map[string]string `obfs:"headers,omitempty"`
 	SkipCertVerify bool              `obfs:"skip-cert-verify,omitempty"`
+	NameCertVerify string            `obfs:"name-cert-verify,omitempty"`
 	Mux            bool              `obfs:"mux,omitempty"`
 }
 
@@ -95,15 +97,20 @@ type shadowTLSOption struct {
 	Certificate    string   `obfs:"certificate,omitempty"`
 	PrivateKey     string   `obfs:"private-key,omitempty"`
 	SkipCertVerify bool     `obfs:"skip-cert-verify,omitempty"`
+	NameCertVerify string   `obfs:"name-cert-verify,omitempty"`
 	Version        int      `obfs:"version,omitempty"`
 	ALPN           []string `obfs:"alpn,omitempty"`
 }
 
 type restlsOption struct {
-	Password     string `obfs:"password"`
-	Host         string `obfs:"host"`
-	VersionHint  string `obfs:"version-hint"`
-	RestlsScript string `obfs:"restls-script,omitempty"`
+	Password       string `obfs:"password"`
+	Host           string `obfs:"host"`
+	VersionHint    string `obfs:"version-hint"`
+	RestlsScript   string `obfs:"restls-script,omitempty"`
+	Fingerprint    string `obfs:"fingerprint,omitempty"`
+	SkipCertVerify bool   `obfs:"skip-cert-verify,omitempty"`
+	NameCertVerify string `obfs:"name-cert-verify,omitempty"`
+	ForceTLS12     bool   `obfs:"force-tls12,omitempty"` // for test
 }
 
 type kcpTunOption struct {
@@ -240,9 +247,9 @@ func (ss *ShadowSocks) ListenPacketContext(ctx context.Context, metadata *C.Meta
 		}
 		destination := M.SocksaddrFromNet(metadata.UDPAddr())
 		if ss.option.UDPOverTCPVersion == uot.LegacyVersion {
-			return newPacketConn(N.NewThreadSafePacketConn(uot.NewConn(c, uot.Request{Destination: destination})), ss), nil
+			return NewPacketConn(N.NewThreadSafePacketConn(uot.NewConn(c, uot.Request{Destination: destination})), ss), nil
 		} else {
-			return newPacketConn(N.NewThreadSafePacketConn(uot.NewLazyConn(c, uot.Request{Destination: destination})), ss), nil
+			return NewPacketConn(N.NewThreadSafePacketConn(uot.NewLazyConn(c, uot.Request{Destination: destination})), ss), nil
 		}
 	}
 	if err := ss.ResolveUDP(ctx, metadata); err != nil {
@@ -254,7 +261,7 @@ func (ss *ShadowSocks) ListenPacketContext(ctx context.Context, metadata *C.Meta
 		return nil, err
 	}
 	pc = ss.method.DialPacketConn(bufio.NewBindPacketConn(pc, addr))
-	return newPacketConn(pc, ss), nil
+	return NewPacketConn(pc, ss), nil
 }
 
 // ProxyInfo implements C.ProxyAdapter
@@ -328,6 +335,7 @@ func NewShadowSocks(option ShadowSocksOption) (*ShadowSocks, error) {
 		if opts.TLS {
 			v2rayOption.TLS = true
 			v2rayOption.SkipCertVerify = opts.SkipCertVerify
+			v2rayOption.NameCertVerify = opts.NameCertVerify
 			v2rayOption.Fingerprint = opts.Fingerprint
 			v2rayOption.Certificate = opts.Certificate
 			v2rayOption.PrivateKey = opts.PrivateKey
@@ -358,6 +366,7 @@ func NewShadowSocks(option ShadowSocksOption) (*ShadowSocks, error) {
 		if opts.TLS {
 			gostOption.TLS = true
 			gostOption.SkipCertVerify = opts.SkipCertVerify
+			gostOption.NameCertVerify = opts.NameCertVerify
 			gostOption.Fingerprint = opts.Fingerprint
 			gostOption.Certificate = opts.Certificate
 			gostOption.PrivateKey = opts.PrivateKey
@@ -385,6 +394,7 @@ func NewShadowSocks(option ShadowSocksOption) (*ShadowSocks, error) {
 			PrivateKey:        opt.PrivateKey,
 			ClientFingerprint: option.ClientFingerprint,
 			SkipCertVerify:    opt.SkipCertVerify,
+			NameCertVerify:    opt.NameCertVerify,
 			Version:           opt.Version,
 		}
 
@@ -404,7 +414,16 @@ func NewShadowSocks(option ShadowSocksOption) (*ShadowSocks, error) {
 		if err != nil {
 			return nil, fmt.Errorf("ss %s initialize restls-plugin error: %w", addr, err)
 		}
-
+		restlsConfig.InsecureSkipVerify = restlsOpt.SkipCertVerify
+		if restlsOpt.Fingerprint != "" {
+			err = restls.SetFingerprint(restlsConfig, restlsOpt.Fingerprint, restlsOpt.NameCertVerify)
+			if err != nil {
+				return nil, fmt.Errorf("ss %s initialize restls-plugin error: %w", addr, err)
+			}
+		} else if restlsOpt.NameCertVerify != "" {
+			restls.SetNameCertVerify(restlsConfig, restlsOpt.NameCertVerify)
+		}
+		restlsConfig.ForceTLS12 = restlsOpt.ForceTLS12
 	} else if option.Plugin == kcptun.Mode {
 		obfsMode = kcptun.Mode
 		kcptunOpt := &kcpTunOption{}

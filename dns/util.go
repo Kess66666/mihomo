@@ -113,7 +113,7 @@ func isIPRequest(q D.Question) bool {
 	return q.Qclass == D.ClassINET && (q.Qtype == D.TypeA || q.Qtype == D.TypeAAAA || q.Qtype == D.TypeCNAME)
 }
 
-func transform(servers []NameServer, resolver *Resolver) []dnsClient {
+func transform(servers []NameServer, resolver resolver.Resolver) []dnsClient {
 	ret := make([]dnsClient, 0, len(servers))
 	for _, s := range servers {
 		var c dnsClient
@@ -126,6 +126,8 @@ func transform(servers []NameServer, resolver *Resolver) []dnsClient {
 			c = newDHCPClient(s.Addr)
 		case "system":
 			c = newSystemClient()
+		case "tailscale":
+			c = newTailscaleClient(s.Addr)
 		case "rcode":
 			c = newRCodeClient(s.Addr)
 		case "quic":

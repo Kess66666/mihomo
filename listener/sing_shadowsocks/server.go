@@ -10,11 +10,14 @@ import (
 	"github.com/metacubex/mihomo/common/sockopt"
 	C "github.com/metacubex/mihomo/constant"
 	LC "github.com/metacubex/mihomo/listener/config"
+	"github.com/metacubex/mihomo/listener/inner"
 	embedSS "github.com/metacubex/mihomo/listener/shadowsocks"
 	"github.com/metacubex/mihomo/listener/sing"
 	"github.com/metacubex/mihomo/log"
 	"github.com/metacubex/mihomo/ntp"
 	"github.com/metacubex/mihomo/transport/kcptun"
+	"github.com/metacubex/mihomo/transport/restls"
+	obfs "github.com/metacubex/mihomo/transport/simple-obfs"
 
 	shadowsocks "github.com/metacubex/sing-shadowsocks"
 	"github.com/metacubex/sing-shadowsocks/shadowaead"
@@ -34,6 +37,8 @@ type Listener struct {
 	udpListeners []net.PacketConn
 	service      shadowsocks.Service
 	shadowTLS    *shadowtls.Service
+	resTLS       *restls.ServerConfig
+	simpleObfs   func(net.Conn) net.Conn
 }
 
 var _listener *Listener
@@ -51,7 +56,7 @@ func (s *shadowTLSService) NewConnection(ctx context.Context, conn net.Conn, met
 	return s.Service.NewConnection(ctx, conn, metadata)
 }
 
-func New(config LC.ShadowsocksServer, tunnel C.Tunnel, additions ...inbound.Addition) (C.MultiAddrListener, error) {
+func New(config LC.ShadowsocksServer, lc C.InboundListenConfig, tunnel C.Tunnel, additions ...inbound.Addition) (C.MultiAddrListener, error) {
 	var sl *Listener
 	var err error
 	if len(additions) == 0 {
@@ -88,7 +93,7 @@ func New(config LC.ShadowsocksServer, tunnel C.Tunnel, additions ...inbound.Addi
 		sl.service, err = shadowaead_2022.NewServiceWithPassword(config.Cipher, config.Password, udpTimeout, h, ntp.Now)
 	default:
 		err = fmt.Errorf("shadowsocks: unsupported method: %s", config.Cipher)
-		return embedSS.New(config, tunnel, additions...)
+		return embedSS.New(config, lc, tunnel, additions...)
 	}
 	if err != nil {
 		return nil, err
@@ -139,6 +144,29 @@ func New(config LC.ShadowsocksServer, tunnel C.Tunnel, additions ...inbound.Addi
 		}
 	}
 
+	if config.ResTLS.Enable {
+		sl.resTLS = &restls.ServerConfig{
+			ServerHostname: config.ResTLS.Dest,
+			Password:       config.ResTLS.Password,
+			RestlsScript:   config.ResTLS.RestlsScript,
+			MinRecordLen:   config.ResTLS.MinRecordLen,
+			DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+				return inner.HandleTcp(tunnel, address, config.ResTLS.Proxy)
+			},
+		}
+	}
+
+	if config.SimpleObfs.Enable {
+		switch config.SimpleObfs.Mode {
+		case "http":
+			sl.simpleObfs = obfs.NewHTTPObfsServer
+		case "tls":
+			sl.simpleObfs = obfs.NewTLSObfsServer
+		default:
+			return nil, fmt.Errorf("unsupported simple obfs mode: %s", config.SimpleObfs.Mode)
+		}
+	}
+
 	var kcptunServer *kcptun.Server
 	if config.KcpTun.Enable {
 		kcptunServer = kcptun.NewServer(config.KcpTun.Config)
@@ -150,7 +178,7 @@ func New(config LC.ShadowsocksServer, tunnel C.Tunnel, additions ...inbound.Addi
 
 		if config.Udp {
 			//UDP
-			ul, err := inbound.ListenPacket("udp", addr)
+			ul, err := lc.ListenPacket(context.Background(), "udp", addr)
 			if err != nil {
 				return nil, err
 			}
@@ -210,7 +238,7 @@ func New(config LC.ShadowsocksServer, tunnel C.Tunnel, additions ...inbound.Addi
 		}
 
 		//TCP
-		l, err := inbound.Listen("tcp", addr)
+		l, err := lc.Listen(context.Background(), "tcp", addr)
 		if err != nil {
 			return nil, err
 		}
@@ -268,6 +296,17 @@ func (l *Listener) AddrList() (addrList []net.Addr) {
 
 func (l *Listener) HandleConn(conn net.Conn, tunnel C.Tunnel, additions ...inbound.Addition) {
 	ctx := sing.WithAdditions(context.TODO(), additions...)
+	if l.resTLS != nil {
+		c, err := restls.Server(context.TODO(), conn, l.resTLS)
+		if err != nil {
+			_ = conn.Close()
+			return
+		}
+		conn = c
+	}
+	if l.simpleObfs != nil {
+		conn = l.simpleObfs(conn)
+	}
 	err := l.service.NewConnection(ctx, conn, M.Metadata{
 		Protocol: "shadowsocks",
 		Source:   M.SocksaddrFromNet(conn.RemoteAddr()),

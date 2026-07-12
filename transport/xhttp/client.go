@@ -3,8 +3,6 @@ package xhttp
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -203,6 +201,10 @@ func NewTransport(dialRaw DialRawFunc, wrapTLS WrapTLSFunc, dialQUIC DialQUICFun
 		keepAlivePeriod = 0
 	}
 	// use h2c mode to disallow the net/http fallback to http1.1
+	//
+	// Note that this usage is only applicable to our own net/http fork.
+	// The standard library also needs to mask the tls.Conn type for the conn returned by DialTLSContext,
+	// see: https://github.com/golang/go/issues/79293#issuecomment-4426393534
 	protocols := new(http.Protocols)
 	protocols.SetUnencryptedHTTP2(true)
 	return &http.Transport{
@@ -233,6 +235,7 @@ type Client struct {
 	cfg                   *Config
 	scMaxEachPostBytes    Range
 	scMinPostsIntervalMs  Range
+	generateSessionID     func() string
 	makeTransport         TransportMaker
 	makeDownloadTransport TransportMaker
 	uploadManager         *ReuseManager
@@ -254,6 +257,10 @@ func NewClient(cfg *Config, makeTransport TransportMaker, makeDownloadTransport 
 	if err != nil {
 		return nil, err
 	}
+	generateSessionID, err := cfg.GetGenerateSessionID()
+	if err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 
 	client := &Client{
@@ -261,6 +268,7 @@ func NewClient(cfg *Config, makeTransport TransportMaker, makeDownloadTransport 
 		cfg:                   cfg,
 		scMaxEachPostBytes:    scMaxEachPostBytes,
 		scMinPostsIntervalMs:  scMinPostsIntervalMs,
+		generateSessionID:     generateSessionID,
 		makeTransport:         makeTransport,
 		makeDownloadTransport: makeDownloadTransport,
 		ctx:                   ctx,
@@ -449,7 +457,7 @@ func (c *Client) DialStreamUp(ctx context.Context) (net.Conn, error) {
 
 	conn := &Conn{writer: pw}
 
-	sessionID := newSessionID()
+	sessionID := c.generateSessionID()
 
 	// Async download: avoid blocking on CDN response header buffering
 	gotConn := make(chan bool, 1)
@@ -576,7 +584,7 @@ func (c *Client) DialPacketUp(ctx context.Context) (net.Conn, error) {
 	if ds := c.cfg.DownloadConfig; ds != nil {
 		downloadCfg = ds
 	}
-	sessionID := newSessionID()
+	sessionID := c.generateSessionID()
 
 	downloadURL := url.URL{
 		Scheme: "https",
@@ -669,12 +677,6 @@ func (c *Client) DialPacketUp(ctx context.Context) (net.Conn, error) {
 	}
 
 	return conn, nil
-}
-
-func newSessionID() string {
-	var b [16]byte
-	_, _ = rand.Read(b[:])
-	return hex.EncodeToString(b[:])
 }
 
 // WaitReadCloser is an io.ReadCloser that blocks on Read() until the underlying

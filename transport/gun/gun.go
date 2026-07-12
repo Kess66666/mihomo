@@ -279,7 +279,7 @@ func NewTransport(dialFn DialFn, tlsConfig *vmess.TLSConfig, gunCfg *Config) *Tr
 			return nil, err
 		}
 
-		if tlsConfig.Reality == nil { // reality doesn't return the negotiated ALPN
+		if tlsConfig.Reality == nil && tlsConfig.TLSMirror == nil { // reality and tlsmirror don't return the negotiated ALPN
 			state := tlsC.GetTLSConnectionState(conn)
 			if p := state.NegotiatedProtocol; p != Http2NextProtoTLS {
 				_ = conn.Close()
@@ -290,6 +290,10 @@ func NewTransport(dialFn DialFn, tlsConfig *vmess.TLSConfig, gunCfg *Config) *Tr
 	}
 
 	// use h2c mode to disallow the net/http fallback to http1.1
+	//
+	// Note that this usage is only applicable to our own net/http fork.
+	// The standard library also needs to mask the tls.Conn type for the conn returned by DialTLSContext,
+	// see: https://github.com/golang/go/issues/79293#issuecomment-4426393534
 	protocols := new(http.Protocols)
 	protocols.SetUnencryptedHTTP2(true)
 	transport := &http.Transport{

@@ -14,8 +14,11 @@ import (
 	LC "github.com/metacubex/mihomo/listener/config"
 	"github.com/metacubex/mihomo/listener/reality"
 	"github.com/metacubex/mihomo/listener/sing"
+	"github.com/metacubex/mihomo/listener/tlsmirror"
 	"github.com/metacubex/mihomo/ntp"
 	"github.com/metacubex/mihomo/transport/gun"
+	"github.com/metacubex/mihomo/transport/mekya"
+	"github.com/metacubex/mihomo/transport/mkcp"
 	mihomoVMess "github.com/metacubex/mihomo/transport/vmess"
 
 	"github.com/metacubex/http"
@@ -24,6 +27,7 @@ import (
 	"github.com/metacubex/sing/common"
 	"github.com/metacubex/sing/common/metadata"
 	"github.com/metacubex/tls"
+	"golang.org/x/exp/slices"
 )
 
 type Listener struct {
@@ -35,7 +39,7 @@ type Listener struct {
 
 var _listener *Listener
 
-func New(config LC.VmessServer, tunnel C.Tunnel, additions ...inbound.Addition) (sl *Listener, err error) {
+func New(config LC.VmessServer, lc C.InboundListenConfig, tunnel C.Tunnel, additions ...inbound.Addition) (sl *Listener, err error) {
 	if len(additions) == 0 {
 		additions = []inbound.Addition{
 			inbound.WithInName("DEFAULT-VMESS"),
@@ -53,6 +57,14 @@ func New(config LC.VmessServer, tunnel C.Tunnel, additions ...inbound.Addition) 
 	})
 	if err != nil {
 		return nil, err
+	}
+	if config.MekyaConfig.Enable {
+		if config.MKCPConfig.Enable {
+			return nil, errors.New("mkcp-config is unavailable in mekya")
+		}
+		if config.WsPath != "" || config.GrpcServiceName != "" {
+			return nil, errors.New("ws and grpc are unavailable in mekya")
+		}
 	}
 
 	service := vmess.NewService[string](h, vmess.ServiceWithDisableHeaderProtection(), vmess.ServiceWithTimeFunc(ntp.Now))
@@ -83,6 +95,7 @@ func New(config LC.VmessServer, tunnel C.Tunnel, additions ...inbound.Addition) 
 	}
 	tlsConfig := &tls.Config{Time: ntp.Now}
 	var realityBuilder *reality.Builder
+	var tlsMirrorBuilder *tlsmirror.Builder
 
 	if config.Certificate != "" && config.PrivateKey != "" {
 		certLoader, err := ca.NewTLSKeyPairLoader(config.Certificate, config.PrivateKey)
@@ -125,6 +138,19 @@ func New(config LC.VmessServer, tunnel C.Tunnel, additions ...inbound.Addition) 
 			return nil, err
 		}
 	}
+	if config.TLSMirrorConfig.PrimaryKey != "" {
+		tlsMirrorBuilder = tlsmirror.Config{
+			PrimaryKey:                    config.TLSMirrorConfig.PrimaryKey,
+			Dest:                          config.TLSMirrorConfig.Dest,
+			Proxy:                         config.TLSMirrorConfig.Proxy,
+			ExplicitNonceCipherSuites:     config.TLSMirrorConfig.ExplicitNonceCipherSuites,
+			DeferInstanceDerivedWriteTime: config.TLSMirrorConfig.DeferInstanceDerivedWriteTime.Build(),
+			TransportLayerPadding:         config.TLSMirrorConfig.TransportLayerPadding.Build(),
+			ConnectionEnrolment:           config.TLSMirrorConfig.ConnectionEnrolment.Build(),
+			SequenceWatermarkingEnabled:   config.TLSMirrorConfig.SequenceWatermarkingEnabled,
+		}.Build(tunnel)
+		h.Tunnel = tlsMirrorBuilder.WrapTunnel(tunnel)
+	}
 	if config.WsPath != "" {
 		httpMux := http.NewServeMux()
 		httpMux.HandleFunc(config.WsPath, func(w http.ResponseWriter, r *http.Request) {
@@ -149,22 +175,57 @@ func New(config LC.VmessServer, tunnel C.Tunnel, additions ...inbound.Addition) 
 		})
 		httpServer.Protocols.SetHTTP2(true)
 		// SetUnencryptedHTTP2 to ensure we can work in plain http2 and some tls conn is not *tls.Conn (like *reality.Conn)
+		//
+		// Enable HTTP/2 support unconditionally on the server.
+		//
+		// Note that this usage is limited to our own net/http fork
+		// The standard library also needs to mask the tls.Conn type for the conn returned by the Listener.
+		// see: https://github.com/golang/go/issues/79293#issuecomment-4426393534
 		httpServer.Protocols.SetUnencryptedHTTP2(true)
 		tlsConfig.NextProtos = append([]string{"h2"}, tlsConfig.NextProtos...) // h2 must before http/1.1
+	}
+	if config.MekyaConfig.Enable {
+		if !slices.Contains(tlsConfig.NextProtos, "http/1.1") {
+			tlsConfig.NextProtos = append([]string{"http/1.1"}, tlsConfig.NextProtos...)
+		}
+		if !slices.Contains(tlsConfig.NextProtos, "h2") {
+			tlsConfig.NextProtos = append([]string{"h2"}, tlsConfig.NextProtos...)
+		}
 	}
 
 	for _, addr := range strings.Split(config.Listen, ",") {
 		addr := addr
 
 		//TCP
-		l, err := inbound.Listen("tcp", addr)
-		if err != nil {
-			return nil, err
+		var l net.Listener
+		if config.MKCPConfig.Enable {
+			pc, err := lc.ListenPacket(context.Background(), "udp", addr)
+			if err != nil {
+				return nil, err
+			}
+			l, err = mkcp.Listen(context.Background(), pc, config.MKCPConfig.Build())
+			if err != nil {
+				_ = pc.Close()
+				return nil, err
+			}
+		} else {
+			l, err = lc.Listen(context.Background(), "tcp", addr)
+			if err != nil {
+				return nil, err
+			}
 		}
-		if realityBuilder != nil {
+		if tlsMirrorBuilder != nil {
+			l = tlsMirrorBuilder.NewListener(l)
+		} else if realityBuilder != nil {
 			l = realityBuilder.NewListener(l)
 		} else if tlsConfig.GetCertificate != nil {
 			l = tls.NewListener(l, tlsConfig)
+		}
+		if config.MekyaConfig.Enable {
+			l, err = mekya.Listen(context.Background(), l, config.MekyaConfig.Build())
+			if err != nil {
+				return nil, err
+			}
 		}
 		sl.listeners = append(sl.listeners, l)
 

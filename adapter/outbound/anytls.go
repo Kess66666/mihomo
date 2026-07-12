@@ -33,6 +33,7 @@ type AnyTLSOption struct {
 	ECHOpts                  ECHOptions `proxy:"ech-opts,omitempty"`
 	ClientFingerprint        string     `proxy:"client-fingerprint,omitempty"`
 	SkipCertVerify           bool       `proxy:"skip-cert-verify,omitempty"`
+	NameCertVerify           string     `proxy:"name-cert-verify,omitempty"`
 	Fingerprint              string     `proxy:"fingerprint,omitempty"`
 	Certificate              string     `proxy:"certificate,omitempty"`
 	PrivateKey               string     `proxy:"private-key,omitempty"`
@@ -63,7 +64,7 @@ func (t *AnyTLS) ListenPacketContext(ctx context.Context, metadata *C.Metadata) 
 
 	// create uot on tcp
 	destination := M.SocksaddrFromNet(metadata.UDPAddr())
-	return newPacketConn(N.NewThreadSafePacketConn(uot.NewLazyConn(c, uot.Request{Destination: destination})), t), nil
+	return NewPacketConn(N.NewThreadSafePacketConn(uot.NewLazyConn(c, uot.Request{Destination: destination})), t), nil
 }
 
 // SupportUOT implements C.ProxyAdapter
@@ -118,6 +119,7 @@ func NewAnyTLS(option AnyTLSOption) (*AnyTLS, error) {
 	tlsConfig := &vmess.TLSConfig{
 		Host:              option.SNI,
 		SkipCertVerify:    option.SkipCertVerify,
+		NameCertVerify:    option.NameCertVerify,
 		NextProtos:        option.ALPN,
 		FingerPrint:       option.Fingerprint,
 		Certificate:       option.Certificate,
